@@ -13,10 +13,13 @@ from Plotting import *
 def ComputeRatio(x):
     return 100 * x[1]/x[0] 
 
-def get_filename(label, aggregator):
-    if aggregator != "":
-        aggregator = "_"+aggregator
-    return "files/" + label + "_imp"+aggregator+".txt"
+def get_file_path(dimensions, nb_days, table_name, with_label_number = False):
+    return "files/" + get_filename(dimensions, nb_days, table_name, with_label_number)
+
+def get_filename(dimensions, nb_days, table_name, with_label_number = False):
+    days = str(nb_days) + "days" if nb_days > -1 else "alldays"
+    description = "labelnb" + table_name  if with_label_number else table_name
+    return "_".join([description, "_".join(dimensions), days]) + ".txt"
 
 # Reads a file
 def read_and_clean(filename, label, label_aggregation, filtered_days, additional_columns = True):
@@ -39,14 +42,28 @@ def read_and_clean(filename, label, label_aggregation, filtered_days, additional
         return df
 
 
-def compute_additional_columns(df, label):
+def read_and_clean2(filename, dimensions, sorting_dimensions=[], ascending=True):
+    df = pd.read_csv(filename, sep='\t', header=None)
+    names = list(dimensions)
+    names.extend(['Count', "Output"])
+    df.columns = names
+    df = df.fillna("Other")
+
+    # order
+    if len(sorting_dimensions) > 0:
+        df = df.sort_values(by=sorting_dimensions, ascending=ascending)
+
+    # Compute ratio (sales or click)
+    # df['Ratio'] = df[["Count", "Output"]].apply(lambda x: ComputeRatio(x.values), axis=1)
+
+    return df
+
+def compute_additional_columns(df):
     # Compute the columns relatives to date that are missing
     df['WeekDay'] = df[["Day"]].apply(lambda x: calendar.day_name[datetime.strptime(x.values[0], '%Y-%m-%d').weekday()], axis=1)
     df['WeekHour'] = df[["WeekDay", "Hour"]].apply(lambda x: str(x.values[0]) + str(x.values[1]), axis=1)
     df['DayAndHour'] = df[["Day", "Hour"]].apply(lambda x: str(x.values[0]) + str(x.values[1]), axis=1)
 
-    # Compute ratio (sales or click)
-    df['Ratio'] = df[["Count", label]].apply(lambda x: ComputeRatio(x.values), axis=1)
 
     return df
 
@@ -57,6 +74,9 @@ def split(df, label_table):
     df_by_hour = compute_ratio(df_by_hour, label_table)
     return [df_by_day, df_by_hour]
 
+def split2(df, dimensions,sortingLabels = "", ascending= True):
+    groups = [group_by_label_sum(df, dimension, sortingLabels, ascending) for dimension in dimensions]
+    return [compute_ratio2(group) for group in groups]
 
 def group_by_label_sum(df, labels, sortingLabels = "", ascending= True): #, orderByLabel, )
     df_by_label = df.groupby(labels, as_index = False).sum()
@@ -72,6 +92,10 @@ def group_by_label_average(df, labels, sortingLabels = "", ascending= True): #, 
 
 def compute_ratio(df, ratioLabel):
     df['Ratio'] = df[["Count",ratioLabel]].apply(lambda x: ComputeRatio(x.values),axis = 1)
+    return df
+
+def compute_ratio2(df):
+    df['Ratio'] = df[["Count","Output"]].apply(lambda x: ComputeRatio(x.values),axis = 1)
     return df
 
 def compute_percentage_volumes(df, volumeLabel):
@@ -112,7 +136,7 @@ def display_rows_by_aggretor0(df,aggregator,label_table):
     #print(rows)
     display(rows)
 
-def display_rows_by_aggretor(df,aggregator,label_table, values=[]):
+def display_rows_by_aggretor(df,aggregator,label_table,volume_label, values=[]):
     i = 0
     rows = [["", "Mean", 'Std', "Std/Mean percent"]]
 
@@ -124,7 +148,7 @@ def display_rows_by_aggretor(df,aggregator,label_table, values=[]):
 
         df_aggregator_by_hour = group_by_label_average(df_aggregator, ["Hour"])
         df_aggregator_by_hour = compute_ratio(df_aggregator_by_hour, label_table)
-        update_rows(rows, [(df_aggregator_by_day, "day"), (df_aggregator_by_hour, "hour")], ["Count"], str(value))
+        update_rows(rows, [(df_aggregator_by_day, "day"), (df_aggregator_by_hour, "hour")], [volume_label], str(value))
 
     display(rows)
 
@@ -174,30 +198,20 @@ def crop_and_group_others(df, criteria_label, volume_label, threshold=0, nb_rows
     return df_cropped_rows.append({criteria_label:"Others", volume_label:df_others[volume_label].sum()}, ignore_index=True)
 
 
-def get_top_values_for_aggregator(df, aggregator, volume_label, cropping_threshold=0, cropping_nb_rows=-1):
+def get_top_values_for_aggregator(df, aggregator, volume_label, cropping_threshold=0, cropping_nb_rows=-1, subplot=0):
     df_grouped = group_by_label_sum(df, aggregator, volume_label, False)
     df_grouped = compute_percentage_volumes(df_grouped, volume_label)
 
     # Crop to restrain to the volumes higher than 1 percent of total volume
     df_crop = crop_and_group_others(df_grouped, aggregator, "Percentage " + volume_label, cropping_threshold,
                                     cropping_nb_rows)
-
-    # plot pie
-    #plot_pie_df(df_crop, "Percentage " + volume_label, aggregator, aggregator + " per " + volume_label)
-
-    return[df_crop[aggregator].as_matrix(), df_crop]
-
-
-def get_top_values_for_aggregator2(df, aggregator, volume_label, cropping_threshold=0, cropping_nb_rows=-1, subplot=0):
-    df_grouped = group_by_label_sum(df, aggregator, volume_label, False)
-    df_grouped = compute_percentage_volumes(df_grouped, volume_label)
-
-    # Crop to restrain to the volumes higher than 1 percent of total volume
-    df_crop = crop_and_group_others(df_grouped, aggregator, "Percentage " + volume_label, cropping_threshold,
-                                    cropping_nb_rows)
-
-    plt.subplot(subplot)
-    plt.title(aggregator + " per " + volume_label, size=20)
-    plt.pie(df_crop["Percentage " + volume_label], labels=df_crop[aggregator], autopct='%.0f%%')
 
     return [df_crop[aggregator].as_matrix(), df_crop]
+
+
+def sizeof_fmt(num, suffix='B'):
+    for unit in ['','K','M','G','T','P','E','Z']:
+        if abs(num) < 1024.0:
+            return "%3.1f%s%s" % (num, unit, suffix)
+        num /= 1024.0
+    return "%.1f%s%s" % (num, 'Yi', suffix)
