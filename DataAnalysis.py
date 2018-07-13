@@ -66,6 +66,11 @@ def group_by_label_average(df, labels, sortingLabels = "", ascending= True): #, 
         df_by_label = df_by_label.sort_values(by=sortingLabels, ascending=ascending)
     return df_by_label
 
+
+def ComputeRatio(x):
+    return 100 * x[1] / x[0]
+
+
 # Compute the ratio as a percentage from a df
 def compute_ratio(df):
     df['Ratio'] = df[["Count","Output"]].apply(lambda x: ComputeRatio(x.values),axis = 1)
